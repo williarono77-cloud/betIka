@@ -66,7 +66,8 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
         const { data, error: err } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined },
+          options: { emailRedirectTo: `${import.meta.env.VITE_SITE_URL ?? window.location.origin}/auth/callback`,
+ },
         })
         if (err) throw err
         setError(null)
@@ -180,3 +181,4 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
     </div>
   )
 }
+
