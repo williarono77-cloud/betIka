@@ -63,12 +63,13 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
     setLoading(true)
     try {
       if (mode === 'register') {
-        const { data, error: err } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: { emailRedirectTo: `${import.meta.env.VITE_SITE_URL ?? window.location.origin}/auth/callback`,
- },
-        })
+      const { data, error: err } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          emailRedirectTo: `${import.meta.env.VITE_SITE_URL ?? window.location.origin}/auth/callback`,
+        },
+      })
         if (err) throw err
         setError(null)
         // If Supabase requires email confirmation, session may be null until user confirms
@@ -181,4 +182,5 @@ export default function AuthModal({ isOpen, onClose, onSuccess }) {
     </div>
   )
 }
+
 
