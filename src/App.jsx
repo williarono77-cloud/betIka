@@ -222,7 +222,7 @@ useEffect(() => {
     }
   })();
 }
-
+  }
   function handleAuthSuccess() {
     refreshPrivateData()
     setMessage({ type: 'success', text: 'Welcome! You are now logged in.' })
@@ -337,6 +337,7 @@ const currentRoundNumber =
     </div>
   )
 }
+
 
 
 
