@@ -5,11 +5,11 @@ import { getStake, setStake } from '../utils/storage.js'
 const QUICK_CHIPS = [100, 250, 1000, 25000]
 
 export default function BetPanel({ panelId = '1', session, onBetClick }) {
-  const [stake, setStakeState] = useState(() => getStake(panelId) || 10)
+  const [stake, setStakeState] = useState(() => getStake(panelId) || 100)
   const [activeTab, setActiveTab] = useState('bet')
 
   function updateStake(delta) {
-    const newStake = Math.max(1, stake + delta)
+    const newStake = Math.max(100, stake + delta)
     setStakeState(newStake)
     setStake(panelId, newStake)
   }
@@ -71,3 +71,4 @@ export default function BetPanel({ panelId = '1', session, onBetClick }) {
     </div>
   )
 }
+
