@@ -181,10 +181,47 @@ useEffect(() => {
     if (action === 'auth') {
       setAuthModalOpen(true)
     } else if (action === 'bet' && session) {
-      // Place bet intent (no real money movement)
-      setMessage({ type: 'info', text: `Betting ${stake} KES coming soon. This is a UI preview.` })
-    }
+  const stakeNumber = Number(stake);
+
+  // 1) Validate
+  if (!Number.isFinite(stakeNumber)) {
+    setMessage({ type: 'error', text: 'Invalid stake amount.' });
+    return;
   }
+  if (stakeNumber < 100) {
+    setMessage({ type: 'error', text: 'Minimum bet amount is KSh 100.' });
+    return;
+  }
+
+  // 2) Check balance (wallet is already loaded in App.jsx)
+  const available = (wallet?.available_cents ?? 0) / 100;
+  if (stakeNumber > available) {
+    setMessage({ type: 'error', text: 'Insufficient balance.' });
+    return;
+  }
+
+  // 3) Perform the bet atomically in the DB (RPC)
+  (async () => {
+    try {
+      const stake_cents = Math.round(stakeNumber * 100);
+
+      const { data, error } = await supabase.rpc('place_bet', {
+        p_stake_cents: stake_cents,
+        p_round_id: currentRound?.id ?? null,
+      });
+
+      if (error) throw error;
+
+      setMessage({ type: 'success', text: `Bet placed: KSh ${stakeNumber.toFixed(2)}` });
+
+      // Refresh wallet after bet
+      refreshPrivateData();
+    } catch (e) {
+      console.error('place_bet failed:', e);
+      setMessage({ type: 'error', text: e?.message ?? 'Failed to place bet.' });
+    }
+  })();
+}
 
   function handleAuthSuccess() {
     refreshPrivateData()
@@ -300,6 +337,7 @@ const currentRoundNumber =
     </div>
   )
 }
+
 
 
 
