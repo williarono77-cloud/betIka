@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase, isSupabaseConfigured } from "./supabaseClient.js";
+import AdminDashboard from "./components/AdminDashboard.jsx";
 
 import TopBar from "./components/TopBar.jsx";
 import HeaderRow from "./components/HeaderRow.jsx";
@@ -30,6 +31,7 @@ export default function App() {
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [feedTab, setFeedTab] = useState("all"); // 'all' | 'previous' | 'top'
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Data state
   const [wallet, setWallet] = useState(null);
@@ -38,6 +40,41 @@ export default function App() {
 
   const userId = session?.user?.id ?? null;
 
+  useEffect(() => {
+  let cancelled = false;
+
+  async function loadRole() {
+    if (!userId || !isSupabaseConfigured) {
+      setIsAdmin(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (cancelled) return;
+
+    if (error) {
+      console.error("Failed to load role:", error);
+      setIsAdmin(false);
+      return;
+    }
+
+    setIsAdmin(data?.role === "admin");
+  }
+
+  loadRole();
+
+  return () => {
+    cancelled = true;
+  };
+}, [userId]);
+
+
+  
   const clearMessage = useCallback(() => setMessage(null), []);
 
   const refreshPrivateData = useCallback(async () => {
@@ -233,6 +270,21 @@ export default function App() {
     return <LoadingOverlay />;
   }
 
+  if (isAdmin) {
+  return (
+    <div className="app">
+      <Toast message={message} onDismiss={clearMessage} />
+      <TopBar onBack={() => {}} fullscreen={false} onToggleFullscreen={() => {}} />
+      <AdminDashboard
+        user={user}
+        setMessage={setMessage}
+        onNotAdmin={() => setIsAdmin(false)}
+      />
+    </div>
+  );
+}
+
+  
   return (
     <div className={`app ${fullscreen ? "app--fullscreen" : ""}`}>
       <Toast message={message} onDismiss={clearMessage} />
@@ -288,3 +340,4 @@ export default function App() {
     </div>
   );
 }
+
