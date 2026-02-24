@@ -29,6 +29,8 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
   const [stats, setStats] = useState({ totalUsers: null, totalBalanceCents: null })
   const [currentRound, setCurrentRound] = useState(null)
   const [roundError, setRoundError] = useState(null)
+  const [nextRound, setNextRound] = useState(null)
+  const [nextRoundError, setNextRoundError] = useState(null)
 
   const handleLogout = useCallback(async () => {
     await supabase.auth.signOut()
@@ -149,6 +151,23 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
     setCurrentRound(data)
   }, [])
 
+  const fetchNextRound = useCallback(async () => {
+    setNextRoundError(null)
+    const { data, error } = await supabase
+      .from('game_rounds')
+      .select('id, round_id, round_number, status, starts_at, burst_point, created_at')
+      .eq('status', 'live')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) {
+      setNextRoundError(error.message)
+      setNextRound(null)
+      return
+    }
+    setNextRound(data)
+  }, [])
+
   useEffect(() => {
     if (profileRole !== 'admin') return
     fetchWithdrawals()
@@ -156,7 +175,8 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
     fetchLedger()
     fetchStats()
     fetchCurrentRound()
-  }, [profileRole, fetchWithdrawals, fetchDeposits, fetchLedger, fetchStats, fetchCurrentRound])
+    fetchNextRound()
+  }, [profileRole, fetchWithdrawals, fetchDeposits, fetchLedger, fetchStats, fetchCurrentRound, fetchNextRound])
 
   // Realtime: withdrawal_requests and deposits
   useEffect(() => {
@@ -177,15 +197,18 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
     return () => supabase.removeChannel(channel)
   }, [profileRole, fetchWithdrawals, fetchDeposits])
 
-  // Realtime: current round
+  // Realtime: current round and next round (when break loads, tables update; admin sees both)
   useEffect(() => {
     if (profileRole !== 'admin') return
     const channel = supabase
       .channel('admin-round-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'game_rounds' }, () => fetchCurrentRound())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'game_rounds' }, () => {
+        fetchCurrentRound()
+        fetchNextRound()
+      })
       .subscribe()
     return () => supabase.removeChannel(channel)
-  }, [profileRole, fetchCurrentRound])
+  }, [profileRole, fetchCurrentRound, fetchNextRound])
 
   const openConfirm = (action, requestId, label, inputLabel, placeholder, submitLabel, type = 'withdrawal', amount = null) => {
     setConfirmConfig({
@@ -311,12 +334,14 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
       <section className="admin-dashboard__card admin-dashboard__card--wide" style={{ marginBottom: '1.5rem' }}>
         <h3 className="admin-dashboard__card-title">Current round / Next round</h3>
         {roundError && <p className="text-error admin-dashboard__error">{roundError}</p>}
+        {nextRoundError && <p className="text-error admin-dashboard__error">{nextRoundError}</p>}
         <div className="admin-dashboard__next-round">
           <div className="admin-dashboard__preview-card">
+            <div className="admin-dashboard__card-title" style={{ marginBottom: '0.5rem', fontSize: '0.875rem' }}>Current round (from DB)</div>
             <div className="admin-dashboard__round-info">
               <div className="admin-dashboard__info-item">
                 <span className="admin-dashboard__info-label">Round ID</span>
-                <span className="admin-dashboard__info-value">{currentRound?.id ?? '—'}</span>
+                <span className="admin-dashboard__info-value">{currentRound?.id ?? currentRound?.round_id ?? '—'}</span>
               </div>
               <div className="admin-dashboard__info-item">
                 <span className="admin-dashboard__info-label">Status</span>
@@ -332,8 +357,29 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
               </div>
             </div>
           </div>
-          <button type="button" className="admin-dashboard__btn admin-dashboard__btn--secondary" onClick={fetchCurrentRound}>
-            Refresh round
+          <div className="admin-dashboard__preview-card">
+            <div className="admin-dashboard__card-title" style={{ marginBottom: '0.5rem', fontSize: '0.875rem' }}>Next round (from DB, live when break is loading)</div>
+            <div className="admin-dashboard__round-info">
+              <div className="admin-dashboard__info-item">
+                <span className="admin-dashboard__info-label">Round ID</span>
+                <span className="admin-dashboard__info-value">{nextRound?.id ?? nextRound?.round_id ?? '—'}</span>
+              </div>
+              <div className="admin-dashboard__info-item">
+                <span className="admin-dashboard__info-label">Status</span>
+                <span className="admin-dashboard__info-value">{nextRound?.status ?? '—'}</span>
+              </div>
+              <div className="admin-dashboard__info-item">
+                <span className="admin-dashboard__info-label">Starts at</span>
+                <span className="admin-dashboard__info-value">{nextRound?.starts_at ? formatDate(nextRound.starts_at) : '—'}</span>
+              </div>
+              <div className="admin-dashboard__info-item">
+                <span className="admin-dashboard__info-label">Round #</span>
+                <span className="admin-dashboard__info-value">{nextRound?.round_number ?? '—'}</span>
+              </div>
+            </div>
+          </div>
+          <button type="button" className="admin-dashboard__btn admin-dashboard__btn--secondary" onClick={() => { fetchCurrentRound(); fetchNextRound(); }}>
+            Refresh rounds
           </button>
         </div>
       </section>
