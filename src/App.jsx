@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase, isSupabaseConfigured } from "./supabaseClient.js";
-import AdminDashboard from "./components/AdminDashboard.jsx";
 
 import TopBar from "./components/TopBar.jsx";
 import HeaderRow from "./components/HeaderRow.jsx";
@@ -31,7 +30,6 @@ export default function App() {
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [feedTab, setFeedTab] = useState("all"); // 'all' | 'previous' | 'top'
-  const [isAdmin, setIsAdmin] = useState(false);
 
   // Data state
   const [wallet, setWallet] = useState(null);
@@ -39,43 +37,7 @@ export default function App() {
   const [deposits, setDeposits] = useState([]);
 
   const userId = session?.user?.id ?? null;
-console.log("SESSION USER ID:", userId);
 
-  useEffect(() => {
-  let cancelled = false;
-
-  async function loadRole() {
-    if (!userId || !isSupabaseConfigured) {
-      setIsAdmin(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (cancelled) return;
-
-    if (error) {
-      console.error("Failed to load role:", error);
-      setIsAdmin(false);
-      return;
-    }
-
-    setIsAdmin(data?.role === "admin");
-  }
-
-  loadRole();
-
-  return () => {
-    cancelled = true;
-  };
-}, [userId]);
-
-
-  
   const clearMessage = useCallback(() => setMessage(null), []);
 
   const refreshPrivateData = useCallback(async () => {
@@ -175,14 +137,16 @@ console.log("SESSION USER ID:", userId);
     };
   }, [userId]);
 
-  // Public data: initial fetch + polling fallback
+  // Public data: initial fetch + polling (faster during break so next round is fetched when tables update)
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
     refreshPublicData();
-    const interval = setInterval(refreshPublicData, 3000);
+    const isBreak = currentRound?.status === "ended" || currentRound?.state === "ended";
+    const intervalMs = isBreak ? 1500 : 3000;
+    const interval = setInterval(refreshPublicData, intervalMs);
     return () => clearInterval(interval);
-  }, [refreshPublicData]);
+  }, [refreshPublicData, currentRound?.status, currentRound?.state]);
 
   // Realtime: game rounds
   useEffect(() => {
@@ -271,21 +235,6 @@ console.log("SESSION USER ID:", userId);
     return <LoadingOverlay />;
   }
 
-  if (isAdmin) {
-  return (
-    <div className="app">
-      <Toast message={message} onDismiss={clearMessage} />
-      <TopBar onBack={() => {}} fullscreen={false} onToggleFullscreen={() => {}} />
-      <AdminDashboard
-        user={user}
-        setMessage={setMessage}
-        onNotAdmin={() => setIsAdmin(false)}
-      />
-    </div>
-  );
-}
-
-  
   return (
     <div className={`app ${fullscreen ? "app--fullscreen" : ""}`}>
       <Toast message={message} onDismiss={clearMessage} />
@@ -341,5 +290,3 @@ console.log("SESSION USER ID:", userId);
     </div>
   );
 }
-
-
