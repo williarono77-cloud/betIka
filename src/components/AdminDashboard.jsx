@@ -83,20 +83,23 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
     setWithdrawals(data ?? [])
   }, [])
 
-  const fetchDeposits = useCallback(async () => {
-    setDepositsError(null)
-    const { data, error } = await supabase
-      .from('deposits')
-      .select('id, user_id, amount_cents, external_ref, phone, created_at, status')
-      .in('status', ['submitted', 'pending_submit'])
-      .order('created_at', { ascending: true })
-    if (error) {
-      setDepositsError(error.message)
-      setDeposits([])
-      return
-    }
-    setDeposits(data ?? [])
-  }, [])
+const fetchDeposits = useCallback(async () => {
+  setDepositsError(null);
+
+  const { data, error } = await supabase
+    .from('deposits')
+    .select('id, user_id, amount_cents, mpesa_ref, phone, created_at, status, method')
+    .in('status', ['pending_review', 'pending_submit'])
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    setDepositsError(error.message);
+    setDeposits([]);
+    return;
+  }
+
+  setDeposits(data ?? []);
+}, []);
 
   const fetchLedger = useCallback(async () => {
     setLedgerError(null)
@@ -219,16 +222,18 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
     }
   }
 
-  if (guardLoading || profileRole !== 'admin') {
-    return (
-      <div className="admin-dashboard">
-        <div className="admin-dashboard__header">
-          <h1 className="admin-dashboard__title">Admin Dashboard</h1>
-        </div>
-        <div className="admin-dashboard__loading">Checking access…</div>
+if (guardLoading) {
+  return (
+    <div className="admin-dashboard">
+      <div className="admin-dashboard__header">
+        <h1 className="admin-dashboard__title">Admin Dashboard</h1>
       </div>
-    )
-  }
+      <div className="admin-dashboard__loading">Checking access…</div>
+    </div>
+  )
+}
+
+if (profileRole !== 'admin') return null
 
   return (
     <div className="admin-dashboard">
@@ -260,7 +265,7 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
                 {deposits.map((d) => (
                   <tr key={d.id}>
                     <td>{formatKes(d.amount_cents)}</td>
-                    <td>{d.external_ref || '-'}</td>
+                    <td>{d.mpesa_ref || '-'}</td>
                     <td>{d.phone ?? '-'}</td>
                     <td>{formatDate(d.created_at)}</td>
                     <td>
@@ -428,3 +433,4 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
     </div>
   )
 }
+
