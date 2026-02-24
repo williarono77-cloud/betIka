@@ -26,6 +26,14 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
   const [processingId, setProcessingId] = useState(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState(null)
+  const [stats, setStats] = useState({ totalUsers: null, totalBalanceCents: null })
+  const [currentRound, setCurrentRound] = useState(null)
+  const [roundError, setRoundError] = useState(null)
+
+  const handleLogout = useCallback(async () => {
+    await supabase.auth.signOut()
+    window.location.replace('/')
+  }, [])
 
   // Admin guard: only profile.role === 'admin'
   useEffect(() => {
@@ -83,23 +91,20 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
     setWithdrawals(data ?? [])
   }, [])
 
-const fetchDeposits = useCallback(async () => {
-  setDepositsError(null);
-
-  const { data, error } = await supabase
-    .from('deposits')
-    .select('id, user_id, amount_cents, mpesa_ref, phone, created_at, status, method')
-    .in('status', ['pending_review', 'pending_submit'])
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    setDepositsError(error.message);
-    setDeposits([]);
-    return;
-  }
-
-  setDeposits(data ?? []);
-}, []);
+  const fetchDeposits = useCallback(async () => {
+    setDepositsError(null)
+    const { data, error } = await supabase
+      .from('deposits')
+      .select('id, user_id, amount_cents, external_ref, phone, created_at, status')
+      .in('status', ['submitted', 'pending_submit'])
+      .order('created_at', { ascending: true })
+    if (error) {
+      setDepositsError(error.message)
+      setDeposits([])
+      return
+    }
+    setDeposits(data ?? [])
+  }, [])
 
   const fetchLedger = useCallback(async () => {
     setLedgerError(null)
@@ -120,12 +125,38 @@ const fetchDeposits = useCallback(async () => {
     setLedger(data ?? [])
   }, [ledgerUserId])
 
+  const fetchStats = useCallback(async () => {
+    const [profilesRes, walletsRes] = await Promise.all([
+      supabase.from('profiles').select('*', { count: 'exact', head: true }),
+      supabase.from('wallets').select('available_cents, locked_cents'),
+    ])
+    const totalUsers = profilesRes?.count ?? 0
+    let totalBalanceCents = 0
+    if (walletsRes?.data && Array.isArray(walletsRes.data)) {
+      totalBalanceCents = walletsRes.data.reduce((s, w) => s + (w.available_cents ?? 0) + (w.locked_cents ?? 0), 0)
+    }
+    setStats({ totalUsers, totalBalanceCents })
+  }, [])
+
+  const fetchCurrentRound = useCallback(async () => {
+    setRoundError(null)
+    const { data, error } = await supabase.from('current_round').select('*').maybeSingle()
+    if (error) {
+      setRoundError(error.message)
+      setCurrentRound(null)
+      return
+    }
+    setCurrentRound(data)
+  }, [])
+
   useEffect(() => {
     if (profileRole !== 'admin') return
     fetchWithdrawals()
     fetchDeposits()
     fetchLedger()
-  }, [profileRole, fetchWithdrawals, fetchDeposits, fetchLedger])
+    fetchStats()
+    fetchCurrentRound()
+  }, [profileRole, fetchWithdrawals, fetchDeposits, fetchLedger, fetchStats, fetchCurrentRound])
 
   // Realtime: withdrawal_requests and deposits
   useEffect(() => {
@@ -145,6 +176,16 @@ const fetchDeposits = useCallback(async () => {
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [profileRole, fetchWithdrawals, fetchDeposits])
+
+  // Realtime: current round
+  useEffect(() => {
+    if (profileRole !== 'admin') return
+    const channel = supabase
+      .channel('admin-round-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'game_rounds' }, () => fetchCurrentRound())
+      .subscribe()
+    return () => supabase.removeChannel(channel)
+  }, [profileRole, fetchCurrentRound])
 
   const openConfirm = (action, requestId, label, inputLabel, placeholder, submitLabel, type = 'withdrawal', amount = null) => {
     setConfirmConfig({
@@ -222,25 +263,80 @@ const fetchDeposits = useCallback(async () => {
     }
   }
 
-if (guardLoading) {
-  return (
-    <div className="admin-dashboard">
-      <div className="admin-dashboard__header">
-        <h1 className="admin-dashboard__title">Admin Dashboard</h1>
+  if (guardLoading || profileRole !== 'admin') {
+    return (
+      <div className="admin-dashboard">
+        <div className="admin-dashboard__header">
+          <h1 className="admin-dashboard__title">Admin Dashboard</h1>
+        </div>
+        <div className="admin-dashboard__loading">Checking access…</div>
       </div>
-      <div className="admin-dashboard__loading">Checking access…</div>
-    </div>
-  )
-}
-
-if (profileRole !== 'admin') return null
+    )
+  }
 
   return (
     <div className="admin-dashboard">
-      <div className="admin-dashboard__header">
+      <header className="admin-dashboard__header">
         <h1 className="admin-dashboard__title">Admin Dashboard</h1>
-        <ThemeToggle />
-      </div>
+        <nav className="admin-dashboard__nav" style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+          <a href="/" className="admin-dashboard__nav-link" style={{ color: 'var(--accent-green)', textDecoration: 'none', fontWeight: 600 }}>Back to app</a>
+          <ThemeToggle />
+          <button type="button" className="admin-dashboard__btn admin-dashboard__btn--secondary" onClick={handleLogout}>
+            Logout
+          </button>
+        </nav>
+      </header>
+
+      {/* Analytics */}
+      <section className="admin-dashboard__grid" aria-label="Analytics">
+        <div className="admin-dashboard__card">
+          <div className="admin-dashboard__stat-value">{stats.totalUsers ?? '—'}</div>
+          <div className="admin-dashboard__stat-label">Total users</div>
+        </div>
+        <div className="admin-dashboard__card">
+          <div className="admin-dashboard__stat-value">{stats.totalBalanceCents != null ? formatKes(stats.totalBalanceCents) : '—'}</div>
+          <div className="admin-dashboard__stat-label">Platform balance</div>
+        </div>
+        <div className="admin-dashboard__card">
+          <div className="admin-dashboard__stat-value">{deposits.length}</div>
+          <div className="admin-dashboard__stat-label">Pending deposits</div>
+        </div>
+        <div className="admin-dashboard__card">
+          <div className="admin-dashboard__stat-value">{withdrawals.length}</div>
+          <div className="admin-dashboard__stat-label">Pending withdrawals</div>
+        </div>
+      </section>
+
+      {/* Next round / Current round */}
+      <section className="admin-dashboard__card admin-dashboard__card--wide" style={{ marginBottom: '1.5rem' }}>
+        <h3 className="admin-dashboard__card-title">Current round / Next round</h3>
+        {roundError && <p className="text-error admin-dashboard__error">{roundError}</p>}
+        <div className="admin-dashboard__next-round">
+          <div className="admin-dashboard__preview-card">
+            <div className="admin-dashboard__round-info">
+              <div className="admin-dashboard__info-item">
+                <span className="admin-dashboard__info-label">Round ID</span>
+                <span className="admin-dashboard__info-value">{currentRound?.id ?? '—'}</span>
+              </div>
+              <div className="admin-dashboard__info-item">
+                <span className="admin-dashboard__info-label">Status</span>
+                <span className="admin-dashboard__info-value">{currentRound?.status ?? currentRound?.state ?? '—'}</span>
+              </div>
+              <div className="admin-dashboard__info-item">
+                <span className="admin-dashboard__info-label">Starts at</span>
+                <span className="admin-dashboard__info-value">{currentRound?.starts_at ? formatDate(currentRound.starts_at) : '—'}</span>
+              </div>
+              <div className="admin-dashboard__info-item">
+                <span className="admin-dashboard__info-label">Burst / Result</span>
+                <span className="admin-dashboard__info-value">{currentRound?.burst_point != null ? `${Number(currentRound.burst_point).toFixed(2)}x` : '—'}</span>
+              </div>
+            </div>
+          </div>
+          <button type="button" className="admin-dashboard__btn admin-dashboard__btn--secondary" onClick={fetchCurrentRound}>
+            Refresh round
+          </button>
+        </div>
+      </section>
 
       {/* Deposit queue */}
       <div className="admin-dashboard__card admin-dashboard__card--wide" style={{ marginBottom: '1.5rem' }}>
@@ -265,7 +361,7 @@ if (profileRole !== 'admin') return null
                 {deposits.map((d) => (
                   <tr key={d.id}>
                     <td>{formatKes(d.amount_cents)}</td>
-                    <td>{d.mpesa_ref || '-'}</td>
+                    <td>{d.external_ref || '-'}</td>
                     <td>{d.phone ?? '-'}</td>
                     <td>{formatDate(d.created_at)}</td>
                     <td>
@@ -433,4 +529,3 @@ if (profileRole !== 'admin') return null
     </div>
   )
 }
-
