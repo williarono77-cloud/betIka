@@ -39,6 +39,7 @@ export default function App() {
   const [deposits, setDeposits] = useState([]);
 
   const userId = session?.user?.id ?? null;
+console.log("SESSION USER ID:", userId);
 
   useEffect(() => {
   let cancelled = false;
@@ -340,4 +341,5 @@ export default function App() {
     </div>
   );
 }
+
 
