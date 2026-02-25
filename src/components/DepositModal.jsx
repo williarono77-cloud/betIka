@@ -155,6 +155,8 @@ export default function DepositModal({ isOpen, onClose, onSuccess }) {
         type: "success",
         text: "Code submitted! Waiting for admin approval.",
       });
+      if (onSuccess) onSuccess();
+      onClose();
     } catch (e) {
       setMessage({ type: "error", text: e?.message || "Failed to submit reference code." });
     } finally {
@@ -163,8 +165,14 @@ export default function DepositModal({ isOpen, onClose, onSuccess }) {
   }
 
   return (
-    <div className="modalOverlay" style={{ position: "fixed", inset: 0, zIndex: 999999 }}>
-      <div className="modal">
+    <div className="modalOverlay" style={{ position: "fixed", inset: 0, zIndex: 999999, overflowY: "auto" }}>
+      <div
+        className="modal"
+        style={{
+          maxHeight: "100vh",
+          overflowY: "auto",
+        }}
+      >
         <div className="modalHeader">
           <h2>Deposit (Manual M-Pesa)</h2>
           <button onClick={onClose} className="iconBtn" aria-label="Close" type="button">
