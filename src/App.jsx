@@ -35,6 +35,10 @@ export default function App() {
   const [wallet, setWallet] = useState(null);
   const [currentRound, setCurrentRound] = useState(null);
   const [deposits, setDeposits] = useState([]);
+  const [scheduledQueuePublic, setScheduledQueuePublic] = useState([]);
+  const [currentLiveRoundId, setCurrentLiveRoundId] = useState(null);
+  const [lastConsumedRoundId, setLastConsumedRoundId] = useState(null);
+  const [consumingRound, setConsumingRound] = useState(false);
 
   const userId = session?.user?.id ?? null;
 
@@ -66,6 +70,25 @@ export default function App() {
       if (roundRes.data) setCurrentRound(roundRes.data);
     } catch (e) {
       console.error("Failed to load round data:", e);
+    }
+  }, []);
+
+  const refreshPublicQueue = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+    try {
+      const { data, error } = await supabase
+        .from("next_rounds_public")
+        .select("id, round_number, status, created_at")
+        .order("round_number", { ascending: true })
+        .limit(12);
+
+      if (error) {
+        throw error;
+      }
+
+      setScheduledQueuePublic(data ?? []);
+    } catch (e) {
+      console.error("Failed to load public rounds queue:", e);
     }
   }, []);
 
@@ -148,6 +171,12 @@ export default function App() {
     return () => clearInterval(interval);
   }, [refreshPublicData, currentRound?.status, currentRound?.state]);
 
+  // Initial public queue fetch
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    refreshPublicQueue();
+  }, [refreshPublicQueue]);
+
   // Realtime: game rounds
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -156,13 +185,70 @@ export default function App() {
       .channel("round-updates")
       .on("postgres_changes", { event: "*", schema: "public", table: "game_rounds" }, () => {
         refreshPublicData();
+        refreshPublicQueue();
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [refreshPublicData]);
+  }, [refreshPublicData, refreshPublicQueue]);
+
+  // Track current live round id from public current_round view
+  useEffect(() => {
+    const roundId = currentRound?.id ?? null;
+    const status = currentRound?.status ?? currentRound?.state ?? null;
+
+    if (!roundId) {
+      setCurrentLiveRoundId(null);
+      return;
+    }
+
+    if (status === "live" || status === "active") {
+      setCurrentLiveRoundId(roundId);
+    }
+  }, [currentRound?.id, currentRound?.status, currentRound?.state]);
+
+  // Consume finished round via RPC without exposing future burst points
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    const roundId = currentRound?.id ?? null;
+    const status = currentRound?.status ?? currentRound?.state ?? null;
+
+    if (!roundId || status !== "ended") return;
+    if (roundId === lastConsumedRoundId || consumingRound) return;
+
+    let cancelled = false;
+
+    const consume = async () => {
+      setConsumingRound(true);
+      try {
+        const { error } = await supabase.rpc("consume_round", { p_round_id: roundId });
+        if (error) {
+          throw error;
+        }
+
+        if (!cancelled) {
+          setLastConsumedRoundId(roundId);
+          // Refresh the public-safe queue; generation is handled by admin / server
+          refreshPublicQueue();
+        }
+      } catch (e) {
+        console.error("consume_round failed:", e);
+      } finally {
+        if (!cancelled) {
+          setConsumingRound(false);
+        }
+      }
+    };
+
+    consume();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRound?.id, currentRound?.status, currentRound?.state, lastConsumedRoundId, consumingRound, refreshPublicQueue]);
 
 
   const balance = useMemo(() => (wallet?.available_cents ?? 0) / 100, [wallet?.available_cents]);
