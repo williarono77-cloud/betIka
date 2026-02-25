@@ -16,6 +16,7 @@ import DepositModal from "./components/DepositModal.jsx";
 import WithdrawModal from "./components/WithdrawModal.jsx";
 import Toast from "./components/Toast.jsx";
 import LoadingOverlay from "./components/LoadingOverlay.jsx";
+import Dashboard from "./components/Dashboard.jsx";
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -39,6 +40,7 @@ export default function App() {
   const [currentLiveRoundId, setCurrentLiveRoundId] = useState(null);
   const [lastConsumedRoundId, setLastConsumedRoundId] = useState(null);
   const [consumingRound, setConsumingRound] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
 
   const userId = session?.user?.id ?? null;
 
@@ -262,6 +264,13 @@ export default function App() {
     setMessage({ type: "success", text: "Welcome! You are now logged in." });
   }, [refreshPrivateData]);
 
+  const handleDepositSuccess = useCallback(() => {
+    // Refresh wallet / transactions, then show dashboard so the user can wait for approval there
+    refreshPrivateData();
+    setShowDashboard(true);
+    setDepositModalOpen(false);
+  }, [refreshPrivateData]);
+
   const handleLogout = useCallback(async () => {
     try {
       await supabase.auth.signOut();
@@ -333,17 +342,23 @@ export default function App() {
         onAuthClick={() => setAuthModalOpen(true)}
       />
 
-      <GameHeader />
+      {showDashboard ? (
+        <Dashboard user={user} setMessage={setMessage} />
+      ) : (
+        <>
+          <GameHeader />
 
-      <GameCard crashPoint={currentRound?.burst_point ?? null} startsAt={currentRound?.starts_at ?? null} state={currentState} />
+          <GameCard crashPoint={currentRound?.burst_point ?? null} startsAt={currentRound?.starts_at ?? null} state={currentState} />
 
-      <BetPanel panelId="1" session={session} onBetClick={handleBetClick} />
-      <BetPanel panelId="2" session={session} onBetClick={handleBetClick} />
+          <BetPanel panelId="1" session={session} onBetClick={handleBetClick} />
+          <BetPanel panelId="2" session={session} onBetClick={handleBetClick} />
 
-      <FeedTabs activeTab={feedTab} onTabChange={setFeedTab} />
-      {feedTab === "all" && <AllBetsTable />}
-      {feedTab === "previous" && <PreviousRound />}
-      {feedTab === "top" && <TopBetsList />}
+          <FeedTabs activeTab={feedTab} onTabChange={setFeedTab} />
+          {feedTab === "all" && <AllBetsTable />}
+          {feedTab === "previous" && <PreviousRound />}
+          {feedTab === "top" && <TopBetsList />}
+        </>
+      )}
 
       <Drawer
         isOpen={drawerOpen}
@@ -361,7 +376,7 @@ export default function App() {
       <DepositModal
         isOpen={depositModalOpen}
         onClose={() => setDepositModalOpen(false)}
-        onSuccess={refreshPrivateData}
+        onSuccess={handleDepositSuccess}
       />
 
       <WithdrawModal
