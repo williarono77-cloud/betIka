@@ -31,6 +31,9 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
   const [roundError, setRoundError] = useState(null)
   const [nextRound, setNextRound] = useState(null)
   const [nextRoundError, setNextRoundError] = useState(null)
+  const [roundsQueueAdmin, setRoundsQueueAdmin] = useState([])
+  const [roundsQueueError, setRoundsQueueError] = useState(null)
+  const [roundsQueueLoading, setRoundsQueueLoading] = useState(false)
 
   const handleLogout = useCallback(async () => {
     await supabase.auth.signOut()
@@ -140,6 +143,50 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
     setStats({ totalUsers, totalBalanceCents })
   }, [])
 
+  const fetchAdminRoundsQueue = useCallback(async () => {
+    setRoundsQueueError(null)
+    setRoundsQueueLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('next_rounds_admin')
+        .select('id, round_number, status, burst_point, created_at')
+        .order('round_number', { ascending: true })
+
+      if (error) {
+        throw error
+      }
+
+      const queue = data ?? []
+
+      // Top-up logic: when queue gets low, ask DB to generate and then refetch
+      if (queue.length <= 3) {
+        const { error: genError } = await supabase.rpc('generate_next_rounds', { p_target: 12 })
+        if (genError) {
+          throw genError
+        }
+
+        const { data: refillData, error: refillError } = await supabase
+          .from('next_rounds_admin')
+          .select('id, round_number, status, burst_point, created_at')
+          .order('round_number', { ascending: true })
+
+        if (refillError) {
+          throw refillError
+        }
+
+        setRoundsQueueAdmin(refillData ?? [])
+      } else {
+        setRoundsQueueAdmin(queue)
+      }
+    } catch (e) {
+      console.error('Failed to load admin rounds queue:', e)
+      setRoundsQueueError(e?.message || 'Failed to load rounds queue')
+      setRoundsQueueAdmin([])
+    } finally {
+      setRoundsQueueLoading(false)
+    }
+  }, [])
+
   const fetchCurrentRound = useCallback(async () => {
     setRoundError(null)
     const { data, error } = await supabase.from('current_round').select('*').maybeSingle()
@@ -176,7 +223,8 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
     fetchStats()
     fetchCurrentRound()
     fetchNextRound()
-  }, [profileRole, fetchWithdrawals, fetchDeposits, fetchLedger, fetchStats, fetchCurrentRound, fetchNextRound])
+    fetchAdminRoundsQueue()
+  }, [profileRole, fetchWithdrawals, fetchDeposits, fetchLedger, fetchStats, fetchCurrentRound, fetchNextRound, fetchAdminRoundsQueue])
 
   // Realtime: withdrawal_requests and deposits
   useEffect(() => {
@@ -205,10 +253,11 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'game_rounds' }, () => {
         fetchCurrentRound()
         fetchNextRound()
+        fetchAdminRoundsQueue()
       })
       .subscribe()
     return () => supabase.removeChannel(channel)
-  }, [profileRole, fetchCurrentRound, fetchNextRound])
+  }, [profileRole, fetchCurrentRound, fetchNextRound, fetchAdminRoundsQueue])
 
   const openConfirm = (action, requestId, label, inputLabel, placeholder, submitLabel, type = 'withdrawal', amount = null) => {
     setConfirmConfig({
@@ -381,6 +430,73 @@ export default function AdminDashboard({ user, setMessage, onNotAdmin }) {
           <button type="button" className="admin-dashboard__btn admin-dashboard__btn--secondary" onClick={() => { fetchCurrentRound(); fetchNextRound(); }}>
             Refresh rounds
           </button>
+        </div>
+      </section>
+
+      {/* Scheduled rounds queue */}
+      <section className="admin-dashboard__card admin-dashboard__card--wide" style={{ marginBottom: '1.5rem' }}>
+        <h3 className="admin-dashboard__card-title">Scheduled rounds queue</h3>
+        {roundsQueueError && <p className="text-error admin-dashboard__error">{roundsQueueError}</p>}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+            marginBottom: '0.75rem',
+            flexWrap: 'wrap',
+          }}
+        >
+          <button
+            type="button"
+            className="admin-dashboard__btn admin-dashboard__btn--secondary"
+            onClick={fetchAdminRoundsQueue}
+            disabled={roundsQueueLoading}
+          >
+            {roundsQueueLoading ? 'Refreshing…' : 'Refresh queue'}
+          </button>
+          <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
+            Shows the next scheduled rounds. Queue auto top-ups to 12 when low.
+          </span>
+        </div>
+        <div style={{ overflowX: 'auto', paddingBottom: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', minHeight: '4.5rem' }}>
+            {roundsQueueLoading && roundsQueueAdmin.length === 0 ? (
+              <div className="admin-dashboard__empty">Loading rounds…</div>
+            ) : roundsQueueAdmin.length === 0 ? (
+              <div className="admin-dashboard__empty">No scheduled rounds found.</div>
+            ) : (
+              roundsQueueAdmin.map((r) => (
+                <div
+                  key={r.id}
+                  style={{
+                    minWidth: '160px',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '0.5rem',
+                    border: '1px solid var(--border-subtle, rgba(255,255,255,0.08))',
+                    background: 'var(--surface-subtle, rgba(15,23,42,0.85))',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.25rem',
+                    fontSize: '0.75rem',
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: '0.8rem' }}>Round #{r.round_number ?? '—'}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                    <span style={{ opacity: 0.7 }}>Burst</span>
+                    <span>{r.burst_point != null ? `${Number(r.burst_point).toFixed(2)}x` : '—'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                    <span style={{ opacity: 0.7 }}>Status</span>
+                    <span style={{ textTransform: 'uppercase' }}>{r.status ?? '—'}</span>
+                  </div>
+                  <div style={{ opacity: 0.5 }}>
+                    {r.created_at ? formatDate(r.created_at) : 'Created: —'}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </section>
 
